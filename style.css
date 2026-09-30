@@ -1,0 +1,266 @@
+:root {
+  --bg: #f6f6f4;
+  --surface: #ffffff;
+  --border: #d8d8d3;
+  --border-strong: #b9b9b2;
+  --text: #1c1c1a;
+  --muted: #6b6b65;
+  --accent: #1f3a5f;
+  --ok: #1e7a3c;
+  --err: #b3261e;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.container { width: min(1000px, 94%); margin: 0 auto; padding: 0 0 48px; }
+
+h1, h2, h3 { margin: 0; font-weight: 600; }
+h1 { font-size: 20px; }
+h2 { font-size: 18px; }
+h3 { font-size: 15px; }
+p { margin: 0 0 10px; }
+
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.hidden { display: none !important; }
+
+/* ---------- Login ---------- */
+.login-box {
+  max-width: 360px;
+  margin: 12vh auto 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 28px;
+}
+.login-box h1 { margin-bottom: 4px; }
+.login-box p.muted { margin-bottom: 18px; }
+
+/* ---------- Form controls ---------- */
+label { display: block; margin: 0 0 14px; font-weight: 600; font-size: 13px; }
+
+input, select {
+  display: block;
+  width: 100%;
+  height: 38px;
+  margin-top: 5px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  font-weight: 400;
+}
+input:focus, select:focus, button:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+button {
+  height: 38px;
+  padding: 0 16px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+button:hover { filter: brightness(1.12); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button.secondary {
+  background: #fff;
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+button.full { width: 100%; }
+
+.form-message { min-height: 18px; margin: 4px 0 12px; font-size: 13px; }
+.form-message.error { color: var(--err); }
+.form-message.success { color: var(--ok); }
+
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input[type=number] { -moz-appearance: textfield; }
+
+/* ---------- Top bar ---------- */
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 0;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.brand { font-size: 16px; }
+.userbox { display: flex; align-items: center; gap: 12px; }
+.userbox button { height: 32px; padding: 0 12px; }
+
+/* ---------- Admin: event bar ---------- */
+.eventbar { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+.eventbar .field { margin: 0; width: 170px; }
+.eventbar .field.grow { flex: 1 1 260px; width: auto; }
+#admin-event-info { margin: 8px 0 0; min-height: 20px; }
+
+.new-event { margin: 12px 0 20px; }
+.new-event summary {
+  display: inline-flex;
+  align-items: center;
+  height: 38px;
+  padding: 0 16px;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  background: var(--accent);
+  color: #fff;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  font-weight: 600;
+}
+.new-event summary::-webkit-details-marker { display: none; }
+.new-event summary::marker { content: ""; }
+.new-event summary:hover { filter: brightness(1.12); }
+.new-event[open] summary {
+  background: #fff;
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.new-event .inline-form { margin: 12px 0 0; max-width: 520px; }
+
+/* ---------- Tabs ---------- */
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.tab {
+  height: auto;
+  padding: 10px 16px;
+  margin-bottom: -1px;
+  background: none;
+  color: var(--muted);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  white-space: nowrap;
+}
+.tab:hover { filter: none; color: var(--text); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+.panel.narrow { max-width: 640px; }
+
+/* ---------- Inline add forms ---------- */
+.inline-form { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.inline-form input { flex: 1 1 150px; width: auto; margin-top: 0; }
+.inline-form input.w-no { flex: 0 0 90px; }
+.inline-form button { flex: 0 0 auto; }
+
+/* ---------- Tables ---------- */
+.table-scroll {
+  overflow-x: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+#admin-judges table, #admin-contestants table, #admin-criteria table {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+th {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  background: #fafaf8;
+  white-space: nowrap;
+}
+tbody tr:last-child td { border-bottom: 0; }
+small { font-size: 11px; font-weight: 400; }
+
+/* Results: numbers right-aligned after Rank / No. / Contestant */
+.ranking th:nth-child(n+4), .ranking td:nth-child(n+4),
+.detail th:nth-child(n+2), .detail td:nth-child(n+2) { text-align: right; }
+.ranking td:nth-child(1) { width: 56px; }
+.ranking td:nth-child(2) { width: 56px; color: var(--muted); }
+.ranking th:last-child, .ranking td:last-child { font-weight: 600; }
+
+.panel h4 {
+  margin: 24px 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--muted);
+}
+.panel h4:first-child { margin-top: 0; }
+
+/* Per-judge details */
+.judge-score-table {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+.judge-score-table summary { cursor: pointer; padding: 10px 12px; font-weight: 600; }
+.judge-score-table[open] summary { border-bottom: 1px solid var(--border); }
+.judge-score-table .table-scroll { border: 0; border-radius: 0; }
+
+/* Judge access switch */
+.switch { display: flex; align-items: center; gap: 8px; margin: 0; font-weight: 400; font-size: 14px; }
+.switch input { width: auto; height: auto; margin: 0; }
+
+/* ---------- Judge scoresheet ---------- */
+.judge-head { margin-bottom: 16px; }
+.judge-head h2 { margin-bottom: 2px; }
+.judge-head p { margin: 0; }
+
+.score-input { width: 96px; margin: 0; text-align: right; }
+.score-input.saved { border-color: var(--ok); background: #f3faf5; }
+.score-input.error { border-color: var(--err); background: #fdf3f2; }
+
+@media (max-width: 640px) {
+  .userbox { gap: 8px; }
+  .eventbar .field { width: 100%; flex: 1 1 100%; }
+
+  /* Scoresheet becomes one block per contestant, one row per criterion */
+  .scoresheet, .scoresheet tbody { display: block; }
+  .scoresheet thead { display: none; }
+  .scoresheet tr {
+    display: block;
+    margin-bottom: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+  .scoresheet td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 0;
+    padding: 8px 12px;
+  }
+  .scoresheet td:first-child {
+    font-weight: 600;
+    background: #fafaf8;
+    border-bottom: 1px solid var(--border);
+    border-radius: 4px 4px 0 0;
+  }
+  .scoresheet td[data-label]::before { content: attr(data-label); color: var(--muted); }
+  .scoresheet .score-input { width: 110px; height: 44px; font-size: 16px; }
+  .table-scroll:has(.scoresheet) { border: 0; background: none; }
+}

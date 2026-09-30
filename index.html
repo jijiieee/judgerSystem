@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Judging System</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="container">
+
+    <!-- LOGIN -->
+    <section id="login-view" class="login-box">
+      <h1>Judging System</h1>
+      <p class="muted">Sign in to continue.</p>
+
+      <form id="login-form">
+        <label>Email
+          <input type="email" id="login-email" required autocomplete="username">
+        </label>
+        <label>Password
+          <input type="password" id="login-password" required autocomplete="current-password">
+        </label>
+        <p id="login-message" class="form-message"></p>
+        <button type="submit" class="full">Sign in</button>
+      </form>
+    </section>
+
+    <!-- APP -->
+    <section id="app-view" class="hidden">
+      <header class="topbar">
+        <strong class="brand">Judging System</strong>
+        <div class="userbox">
+          <span id="user-label" class="muted"></span>
+          <button id="logout-btn" class="secondary">Logout</button>
+        </div>
+      </header>
+
+      <!-- ADMIN -->
+      <div id="admin-view" class="hidden">
+
+        <div class="eventbar">
+          <label class="field grow">Event
+            <select id="admin-event-select"></select>
+          </label>
+          <label class="field">Status
+            <select id="event-status">
+              <option value="draft">Draft</option>
+              <option value="active">Active</option>
+              <option value="completed">Completed</option>
+              <option value="archived">Archived</option>
+            </select>
+          </label>
+        </div>
+        <p id="admin-event-info" class="muted small"></p>
+
+        <details id="new-event" class="new-event">
+          <summary>+ New event</summary>
+          <form id="event-form" class="inline-form">
+            <input id="event-name" required placeholder="Event name">
+            <button type="submit">Create</button>
+          </form>
+        </details>
+
+        <nav class="tabs" role="tablist">
+          <button class="tab active" data-tab="results" role="tab">Results</button>
+          <button class="tab" data-tab="contestants" role="tab">Contestants</button>
+          <button class="tab" data-tab="criteria" role="tab">Criteria</button>
+          <button class="tab" data-tab="judges" role="tab">Judges</button>
+        </nav>
+
+        <!-- RESULTS -->
+        <section class="panel" id="tab-results">
+          <p class="muted small">
+            Updates every 3 seconds. A contestant is ranked once at least one judge has scored every
+            criterion for them. The average counts only judges who finished that contestant.
+          </p>
+          <div id="admin-scores"></div>
+        </section>
+
+        <!-- CONTESTANTS -->
+        <section class="panel narrow hidden" id="tab-contestants">
+          <form id="contestant-form" class="inline-form">
+            <input type="number" id="contestant-number" placeholder="No." min="1" required class="w-no">
+            <input type="text" id="contestant-name" placeholder="Contestant name" required>
+            <button type="submit">Add</button>
+          </form>
+          <div id="admin-contestants"><p class="muted">Select an event first.</p></div>
+        </section>
+
+        <!-- CRITERIA -->
+        <section class="panel narrow hidden" id="tab-criteria">
+          <form id="criterion-form" class="inline-form">
+            <input type="text" id="criterion-name" placeholder="Criterion (e.g. Poise)" required>
+            <input type="number" id="criterion-max" placeholder="Max" min="1" step="0.01" value="100" required class="w-no">
+            <button type="submit">Add</button>
+          </form>
+          <div id="admin-criteria"><p class="muted">Select an event first.</p></div>
+        </section>
+
+        <!-- JUDGES -->
+        <section class="panel narrow hidden" id="tab-judges">
+          <p class="muted small">
+            Each judge account belongs to this event only and can score only while the event is Active.
+            Turning a judge off or completing the event never deletes scores.
+          </p>
+          <form id="judge-form" class="inline-form">
+            <input type="text" id="judge-name" placeholder="Judge name" required>
+            <input type="email" id="judge-email" placeholder="Login email" required>
+            <input type="text" id="judge-password" placeholder="Password (min 6)" minlength="6" required autocomplete="off">
+            <button type="submit">Add judge</button>
+          </form>
+          <p id="judge-message" class="form-message"></p>
+          <div id="admin-judges"><p class="muted">Select an event first.</p></div>
+        </section>
+      </div>
+
+      <!-- JUDGE -->
+      <div id="judge-view" class="hidden">
+        <div class="judge-head">
+          <h2 id="judge-event-name">Judge Scoresheet</h2>
+          <p class="muted small">Scores save automatically when you leave a field.</p>
+        </div>
+        <div id="judge-scoresheet"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
