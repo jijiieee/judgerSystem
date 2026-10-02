@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Judging System</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="container">
+
+    <!-- LOGIN -->
+    <section id="login-view" class="login-box">
+      <h1>Judging System</h1>
+      <p class="muted">Sign in to continue.</p>
+
+      <form id="login-form">
+        <label class="field">
+          <span class="field-label">Email</span>
+          <input type="email" id="login-email" required autocomplete="username">
+        </label>
+        <label class="field">
+          <span class="field-label">Password</span>
+          <input type="password" id="login-password" required autocomplete="current-password">
+        </label>
+        <p id="login-message" class="form-message"></p>
+        <button type="submit" class="full">Sign in</button>
+      </form>
+    </section>
+
+    <!-- APP -->
+    <section id="app-view" class="hidden">
+      <header class="topbar">
+        <strong class="brand">Judging System</strong>
+        <div class="userbox">
+          <span id="user-label" class="muted"></span>
+          <button id="logout-btn" class="secondary small-btn">Logout</button>
+        </div>
+      </header>
+
+      <!-- ADMIN -->
+      <div id="admin-view" class="hidden">
+
+        <section class="event-card">
+          <div class="event-fields">
+            <label class="field grow">
+              <span class="field-label">Event</span>
+              <select id="admin-event-select"></select>
+            </label>
+            <label class="field w-select">
+              <span class="field-label">Status</span>
+              <select id="event-status">
+                <option value="draft">Draft</option>
+                <option value="active">Active</option>
+                <option value="completed">Completed</option>
+                <option value="archived">Archived</option>
+              </select>
+            </label>
+            <label class="field w-select">
+              <span class="field-label">Numbering</span>
+              <select id="event-numbering-mode">
+                <option value="unique">Unique numbers</option>
+                <option value="by_division">Repeat by division</option>
+              </select>
+            </label>
+            <button type="button" id="new-event-btn" class="secondary">+ New event</button>
+          </div>
+          <p id="admin-event-info" class="event-info"></p>
+        </section>
+
+        <nav class="tabs" role="tablist">
+          <button class="tab active" data-tab="results" role="tab">Results</button>
+          <button class="tab" data-tab="contestants" role="tab">Contestants</button>
+          <button class="tab" data-tab="criteria" role="tab">Scoring setup</button>
+          <button class="tab" data-tab="judges" role="tab">Judges</button>
+        </nav>
+
+        <!-- RESULTS -->
+        <section class="panel" id="tab-results">
+          <div id="admin-scores"></div>
+        </section>
+
+        <!-- CONTESTANTS -->
+        <section class="panel narrow hidden" id="tab-contestants">
+          <p id="contestant-lock-note" class="notice hidden">Contestants are locked while the event is Active.</p>
+          <form id="contestant-form" class="add-form">
+            <label class="field w-md hidden">
+              <span class="field-label">Division</span>
+              <input type="text" id="contestant-division" placeholder="e.g. Junior">
+            </label>
+            <label class="field w-no">
+              <span class="field-label">No.</span>
+              <input type="number" id="contestant-number" min="1" required>
+            </label>
+            <label class="field grow">
+              <span class="field-label">Contestant name</span>
+              <input type="text" id="contestant-name" required>
+            </label>
+            <button type="submit">Add</button>
+          </form>
+          <p id="contestant-numbering-note" class="muted small"></p>
+          <div id="admin-contestants"><p class="muted">Select an event first.</p></div>
+        </section>
+
+        <!-- SCORING SETUP -->
+        <section class="panel hidden" id="tab-criteria">
+          <div class="panel-head">
+            <div>
+              <h3>Scoring setup</h3>
+              <p class="muted small">Each category groups its own criteria and can count toward the finalist score.</p>
+            </div>
+            <div class="panel-head-actions">
+              <p id="category-weight-total" class="weight-summary">Finalist weights: 0% of 100%</p>
+              <button type="button" id="add-category-btn">+ Add category</button>
+            </div>
+          </div>
+          <div id="admin-categories"><p class="muted">Select an event first.</p></div>
+        </section>
+
+        <!-- JUDGES -->
+        <section class="panel narrow hidden" id="tab-judges">
+          <p class="notice">
+            Each judge account belongs to this event only and can score only while the event is Active.
+            Turning a judge off or completing the event never deletes scores.
+          </p>
+          <form id="judge-form" class="add-form">
+            <label class="field grow">
+              <span class="field-label">Judge name</span>
+              <input type="text" id="judge-name" required>
+            </label>
+            <label class="field grow">
+              <span class="field-label">Login email</span>
+              <input type="email" id="judge-email" required>
+            </label>
+            <label class="field grow">
+              <span class="field-label">Password</span>
+              <input type="text" id="judge-password" placeholder="Min. 6 characters" minlength="6" required autocomplete="off">
+            </label>
+            <button type="submit">Add judge</button>
+          </form>
+          <p id="judge-message" class="form-message"></p>
+          <div id="admin-judges"><p class="muted">Select an event first.</p></div>
+        </section>
+      </div>
+
+      <!-- JUDGE -->
+      <div id="judge-view" class="hidden">
+        <div class="judge-head">
+          <h2 id="judge-event-name">Judge Scoresheet</h2>
+          <p class="muted small">Score one category at a time. Scores save automatically when you leave a field.</p>
+        </div>
+        <div id="judge-scoresheet"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast-root" class="toast-root" aria-live="polite"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
