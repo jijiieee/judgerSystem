@@ -1205,16 +1205,28 @@ function stopPolling(){if(pollingTimer){clearInterval(pollingTimer);pollingTimer
 // without the judge needing to refresh. Skips a cycle while the judge is
 // actively typing into a score cell, so it never interrupts their input —
 // each score is already saved on change, so nothing is lost by waiting.
+function maybeRefreshJudgeScoresheet(){
+  if (currentProfile?.role !== "judge" || document.hidden) return;
+  const active = document.activeElement;
+  if (active && active.classList && active.classList.contains("score-input")) return;
+  loadJudgeScoresheet();
+}
 function startJudgePolling(){
   stopJudgePolling();
-  judgePollingTimer = setInterval(() => {
-    if (currentProfile?.role !== "judge" || document.hidden) return;
-    const active = document.activeElement;
-    if (active && active.classList && active.classList.contains("score-input")) return;
-    loadJudgeScoresheet();
-  }, 5000);
+  judgePollingTimer = setInterval(maybeRefreshJudgeScoresheet, 5000);
+  // Mobile browsers throttle/pause timers while the tab is backgrounded
+  // (screen locked, switched apps). Refresh right away when it comes back
+  // instead of waiting for the next tick.
+  document.addEventListener("visibilitychange", maybeRefreshJudgeScoresheet);
+  window.addEventListener("focus", maybeRefreshJudgeScoresheet);
+  window.addEventListener("online", maybeRefreshJudgeScoresheet);
 }
-function stopJudgePolling(){ if (judgePollingTimer) { clearInterval(judgePollingTimer); judgePollingTimer = null; } }
+function stopJudgePolling(){
+  if (judgePollingTimer) { clearInterval(judgePollingTimer); judgePollingTimer = null; }
+  document.removeEventListener("visibilitychange", maybeRefreshJudgeScoresheet);
+  window.removeEventListener("focus", maybeRefreshJudgeScoresheet);
+  window.removeEventListener("online", maybeRefreshJudgeScoresheet);
+}
 function round2(n){return Number(n).toFixed(2).replace(/\.00$/,'').replace(/(\.\d)0$/,'$1');}
 function escapeHtml(value){return String(value??"").replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
 function sanitizeFileName(value){return String(value||"results").replace(/[^a-z0-9-_]+/gi,"-").replace(/^-+|-+$/g,"")||"results";}
