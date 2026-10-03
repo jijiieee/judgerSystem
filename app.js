@@ -5,6 +5,7 @@ let currentProfile = null;
 let events = [];
 let currentAdminEventId = null;
 let pollingTimer = null;
+let judgePollingTimer = null;
 let scoresLoading = false;
 let scoresLoadStartedAt = 0;
 let scoresTicket = 0;
@@ -170,6 +171,7 @@ async function login(e) {
 
 async function logout() {
   stopPolling();
+  stopJudgePolling();
   await supabaseClient.auth.signOut();
   location.reload();
 }
@@ -194,6 +196,7 @@ async function startApp(user) {
   } else if (profile.role === "judge") {
     $("#judge-view").classList.remove("hidden");
     await loadJudgeScoresheet();
+    startJudgePolling();
   } else {
     notify("Unknown account role.");
   }
@@ -1196,6 +1199,22 @@ async function finalizeScores(eventId){
 
 function startPolling(){stopPolling();pollingTimer=setInterval(()=>{if(currentProfile?.role==="admin")loadAdminScores();},3000);}
 function stopPolling(){if(pollingTimer){clearInterval(pollingTimer);pollingTimer=null;}}
+
+// Keeps the judge's scoresheet in sync with whatever the admin changes
+// (new contestants, new criteria, event status, unlocking a finalized judge)
+// without the judge needing to refresh. Skips a cycle while the judge is
+// actively typing into a score cell, so it never interrupts their input —
+// each score is already saved on change, so nothing is lost by waiting.
+function startJudgePolling(){
+  stopJudgePolling();
+  judgePollingTimer = setInterval(() => {
+    if (currentProfile?.role !== "judge" || document.hidden) return;
+    const active = document.activeElement;
+    if (active && active.classList && active.classList.contains("score-input")) return;
+    loadJudgeScoresheet();
+  }, 5000);
+}
+function stopJudgePolling(){ if (judgePollingTimer) { clearInterval(judgePollingTimer); judgePollingTimer = null; } }
 function round2(n){return Number(n).toFixed(2).replace(/\.00$/,'').replace(/(\.\d)0$/,'$1');}
 function escapeHtml(value){return String(value??"").replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
 function sanitizeFileName(value){return String(value||"results").replace(/[^a-z0-9-_]+/gi,"-").replace(/^-+|-+$/g,"")||"results";}
