@@ -44,6 +44,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#login-form").addEventListener("submit", login);
   $("#logout-btn").addEventListener("click", logout);
   $("#new-event-btn").addEventListener("click", openEventDialog);
+  $("#delete-event-btn").addEventListener("click", () => deleteEvent(currentAdminEventId));
   $("#judge-form").addEventListener("submit", createJudge);
   $("#contestant-form").addEventListener("submit", createContestant);
   $("#add-category-btn").addEventListener("click", () => openCategoryDialog());
@@ -258,8 +259,10 @@ function renderEventInfo() {
   if (!event) {
     $("#admin-event-info").innerHTML = `<span>No events yet. Create one to get started.</span>`;
     statusSelect.disabled = true;
+    $("#delete-event-btn").disabled = true;
     return;
   }
+  $("#delete-event-btn").disabled = false;
   statusSelect.disabled = false;
   statusSelect.value = event.status;
   const numbering = $("#event-numbering-mode");
@@ -296,6 +299,33 @@ async function openEventDialog() {
   showTab("contestants");
   await loadAdmin();
   toast("Event created.");
+}
+
+async function deleteEvent(eventId) {
+  const event = events.find(ev => ev.id === eventId);
+  if (!event) { notify("Select an event first."); return; }
+
+  // Typed confirmation (not just Yes/No) because this permanently wipes
+  // contestants, categories, criteria, scores and judge assignments for the
+  // event. Judge LOGINS themselves are kept, same as removing a single judge
+  // — they just end up unassigned from anything.
+  const typed = await formDialog({
+    title: `Delete "${event.name}"?`,
+    description: "This permanently deletes its contestants, categories, criteria, scores, and judge assignments. Judge logins are kept but become unassigned. This can't be undone. Type the event name to confirm.",
+    fields: [{ name: "confirmName", label: "Event name", required: true, placeholder: event.name }],
+    submitText: "Delete event",
+    danger: true,
+    onSubmit: async (v) => {
+      if (v.confirmName.trim() !== event.name) return "That doesn't match the event name.";
+      const { error } = await supabaseClient.from("events").delete().eq("id", eventId);
+      if (error) return error.message;
+    }
+  });
+  if (!typed) return;
+
+  currentAdminEventId = null;
+  await loadAdmin();
+  toast("Event deleted.");
 }
 
 async function updateEventNumberingMode(e) {
@@ -1326,7 +1356,7 @@ function confirmDialog({ title, message, confirmText = "Confirm", cancelText = "
 //            placeholder, hint, showIf: "<checkbox field name>" }]
 // onSubmit(values) may return an error string (dialog stays open and shows it).
 // Resolves true when saved, null when cancelled.
-function formDialog({ title, description = "", fields, submitText = "Save", onSubmit }) {
+function formDialog({ title, description = "", fields, submitText = "Save", danger = false, onSubmit }) {
   return openDialog((dlg, close) => {
     dlg.setAttribute("aria-labelledby", "dlg-title");
     const fieldHtml = (f) => {
@@ -1359,7 +1389,7 @@ function formDialog({ title, description = "", fields, submitText = "Save", onSu
         </div>
         <div class="modal-foot">
           <button type="button" class="secondary" data-cancel>Cancel</button>
-          <button type="submit" data-submit>${escapeHtml(submitText)}</button>
+          <button type="submit" class="${danger ? "danger" : ""}" data-submit>${escapeHtml(submitText)}</button>
         </div>
       </form>`;
 
