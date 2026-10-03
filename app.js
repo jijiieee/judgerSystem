@@ -6,6 +6,7 @@ let events = [];
 let currentAdminEventId = null;
 let pollingTimer = null;
 let judgePollingTimer = null;
+let lastScoreInputActivity = 0; // updated only on real keystrokes, not mere focus
 let scoresLoading = false;
 let scoresLoadStartedAt = 0;
 let scoresTicket = 0;
@@ -92,6 +93,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.addEventListener("visibilitychange", refreshIfAdmin);
   window.addEventListener("focus", refreshIfAdmin);
   window.addEventListener("online", refreshIfAdmin);
+
+  // #judge-scoresheet itself is never replaced (only its innerHTML is, on every
+  // render), so this delegated listener keeps working across re-renders and
+  // records real keystrokes — not just "a field happens to be focused".
+  $("#judge-scoresheet")?.addEventListener("input", (e) => {
+    if (e.target.classList && e.target.classList.contains("score-input")) {
+      lastScoreInputActivity = Date.now();
+    }
+  });
 
   document.querySelectorAll(".tab").forEach(btn =>
     btn.addEventListener("click", () => showTab(btn.dataset.tab))
@@ -1032,15 +1042,28 @@ function exportJudgePdf(judgeId){
 
 async function loadJudgeScoresheet() {
   const sheet = $("#judge-scoresheet");
-  const { data: assignments, error: assignmentError } = await supabaseClient.from("event_judges")
-    .select("event_id, events(name,status)").eq("judge_id", currentUser.id).eq("active", true);
+  // Fetch every assignment this judge has (active or not) so we can tell the
+  // difference between "no event assigned", "the admin turned my access off",
+  // and "the event just isn't Active yet" — instead of one vague message.
+  const { data: allAssignments, error: assignmentError } = await supabaseClient.from("event_judges")
+    .select("event_id, active, events(name,status)").eq("judge_id", currentUser.id);
 
   if (assignmentError) { sheet.innerHTML = `<p>${escapeHtml(assignmentError.message)}</p>`; return; }
 
-  const assignment = (assignments || []).find(a => a.events?.status === "active");
+  const assignment = (allAssignments || []).find(a => a.active && a.events?.status === "active");
   if (!assignment) {
     $("#judge-event-name").textContent = "Judge Scoresheet";
-    sheet.innerHTML = `<div class="judge-empty"><strong>There is no active event right now.</strong><span class="muted small">If judging should be open, ask the admin to set your assigned event to Active.</span></div>`;
+
+    const turnedOff = (allAssignments || []).find(a => !a.active);
+    const notYetActive = (allAssignments || []).find(a => a.active && a.events?.status !== "active");
+
+    const message = turnedOff
+      ? { title: "Your access has been turned off.", body: "The admin turned off your access to this event. Contact them if you think this is a mistake." }
+      : notYetActive
+        ? { title: "There is no active event right now.", body: "If judging should be open, ask the admin to set your assigned event to Active." }
+        : { title: "You are not assigned to any event yet.", body: "Ask the admin to assign you to an event." };
+
+    sheet.innerHTML = `<div class="judge-empty"><strong>${escapeHtml(message.title)}</strong><span class="muted small">${escapeHtml(message.body)}</span></div>`;
     return;
   }
 
@@ -1207,8 +1230,10 @@ function stopPolling(){if(pollingTimer){clearInterval(pollingTimer);pollingTimer
 // each score is already saved on change, so nothing is lost by waiting.
 function maybeRefreshJudgeScoresheet(){
   if (currentProfile?.role !== "judge" || document.hidden) return;
-  const active = document.activeElement;
-  if (active && active.classList && active.classList.contains("score-input")) return;
+  // Skip only while the judge is actively typing RIGHT NOW (last 2s). A field
+  // that's merely focused but idle (e.g. tapped on mobile, then left alone)
+  // must not block the refresh forever.
+  if (Date.now() - lastScoreInputActivity < 2000) return;
   loadJudgeScoresheet();
 }
 function startJudgePolling(){
