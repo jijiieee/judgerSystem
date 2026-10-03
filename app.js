@@ -409,18 +409,18 @@ async function editJudge(judgeId) {
     onSubmit: async (v) => {
       if (v.password && v.password.length < 6) return "Password must be at least 6 characters.";
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.email)) return "Enter a valid email address.";
-      const body = { judge_id: judgeId };
-      if (v.name !== current.name) body.display_name = v.name;
-      if (v.email.toLowerCase() !== current.email.toLowerCase()) body.email = v.email;
-      if (v.password) body.password = v.password;
-      if (Object.keys(body).length === 1) return null; // nothing changed
-      const { data, error } = await supabaseClient.functions.invoke("update-judge", { body });
-      let problem = data?.error || null;
-      if (error) {
-        problem = error.message;
-        try { const details = await error.context.json(); if (details?.error) problem = details.error; } catch (_) {}
+      const changes = {
+        p_display_name: v.name !== current.name ? v.name : null,
+        p_email: v.email.toLowerCase() !== current.email.toLowerCase() ? v.email : null,
+        p_password: v.password || null
+      };
+      if (Object.values(changes).every(x => x === null)) return null; // nothing changed
+      const { error } = await supabaseClient.rpc("admin_update_judge", { p_judge_id: judgeId, ...changes });
+      if (!error) return null;
+      if (error.code === "PGRST202" || /could not find the function/i.test(error.message || "")) {
+        return "The judge-editing function isn't installed yet. Run sql/admin_update_judge.sql in the Supabase SQL Editor, then try again.";
       }
-      return problem;
+      return error.message;
     }
   });
   if (!saved) return;

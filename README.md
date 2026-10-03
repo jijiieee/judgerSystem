@@ -38,12 +38,17 @@ Stack: HTML, CSS, JavaScript, Supabase (PostgreSQL, Auth, Edge Functions)
        insert into public.profiles (id, display_name, role, email)
        values ('YOUR-AUTH-USER-UUID', 'Admin', 'admin', 'your@email.com');
 
-5. Deploy both Edge Functions with the Supabase CLI (they use the service role key server-side only):
+5. Deploy the judge-creation function (needs the Supabase CLI, run inside this folder):
 
+       supabase login
+       supabase link --project-ref YOUR-PROJECT-REF
        supabase functions deploy create-judge
-       supabase functions deploy update-judge
 
-   `update-judge` lives in `functions/update-judge/index.ts`. It powers the **Edit** button on the Judges tab (name, login email, password reset).
+   `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are provided to the function automatically.
+
+   Editing a judge (Edit button on the Judges tab: name, login email, password reset) needs no
+   deployment. It is a database function, already included at the end of `schema.sql`. If your
+   project was set up earlier, open the Supabase SQL Editor and run `sql/admin_update_judge.sql` once.
 6. Serve the folder through a local web server. Do not open `index.html` with `file://`.
 
 ## Running a judging round
