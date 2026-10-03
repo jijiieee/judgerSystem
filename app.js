@@ -44,7 +44,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#login-form").addEventListener("submit", login);
   $("#logout-btn").addEventListener("click", logout);
   $("#new-event-btn").addEventListener("click", openEventDialog);
-  $("#delete-event-btn").addEventListener("click", () => deleteEvent(currentAdminEventId));
+  $("#delete-event-btn")?.addEventListener("click", () => deleteEvent(currentAdminEventId));
   $("#judge-form").addEventListener("submit", createJudge);
   $("#contestant-form").addEventListener("submit", createContestant);
   $("#add-category-btn").addEventListener("click", () => openCategoryDialog());
@@ -259,10 +259,10 @@ function renderEventInfo() {
   if (!event) {
     $("#admin-event-info").innerHTML = `<span>No events yet. Create one to get started.</span>`;
     statusSelect.disabled = true;
-    $("#delete-event-btn").disabled = true;
+    $("#delete-event-btn") && ($("#delete-event-btn").disabled = true);
     return;
   }
-  $("#delete-event-btn").disabled = false;
+  $("#delete-event-btn") && ($("#delete-event-btn").disabled = false);
   statusSelect.disabled = false;
   statusSelect.value = event.status;
   const numbering = $("#event-numbering-mode");
