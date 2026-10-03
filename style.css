@@ -443,3 +443,10 @@ dialog.modal::backdrop { background: rgba(20, 20, 18, .45); }
     background: var(--bg); border-top: 1px solid var(--border);
   }
 }
+
+
+.division-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 16px; }
+.division-tab { background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); border-radius: 999px; padding: 8px 18px; font-weight: 600; }
+.division-tab:hover { filter: none; background: var(--accent-soft); }
+.division-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.category-scoresheet .total-cell { font-weight: 700; }

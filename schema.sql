@@ -411,6 +411,30 @@ to authenticated
 using (judge_id = auth.uid() and public.judge_can_score(event_id))
 with check (judge_id = auth.uid() and public.judge_can_score(event_id));
 
+-- ---------------------------------------------------------------
+-- DIVISION-SPECIFIC SCORING (e.g. Voice vs Dance in one event)
+-- A category with a division is scored only for contestants in that division.
+-- A category with no division applies to everyone.
+-- ---------------------------------------------------------------
+alter table public.scoring_categories add column if not exists division text;
+
+create or replace function public.criterion_applies_to_contestant(p_contestant uuid, p_criterion uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce((
+    select nullif(lower(btrim(sc.division)), '') is null
+        or nullif(lower(btrim(c.division)), '') is null
+        or lower(btrim(sc.division)) = lower(btrim(c.division))
+    from public.contestants c, public.criteria k
+    join public.scoring_categories sc on sc.id = k.category_id
+    where c.id = p_contestant and k.id = p_criterion
+  ), false)
+$$;
+
 -- Finalize a judge's complete scoresheet. This is intentionally a function so
 -- the client cannot bypass the completion/locking rules with direct inserts.
 create or replace function public.finalize_judge_scores(p_event uuid)
@@ -431,11 +455,13 @@ begin
   select count(*) into v_total
   from public.contestants c
   cross join public.criteria k
-  where c.event_id = p_event and k.event_id = p_event;
+  where c.event_id = p_event and k.event_id = p_event
+    and public.criterion_applies_to_contestant(c.id, k.id);
 
   select count(*) into v_scored
   from public.scores s
-  where s.event_id = p_event and s.judge_id = auth.uid() and s.score is not null;
+  where s.event_id = p_event and s.judge_id = auth.uid() and s.score is not null
+    and public.criterion_applies_to_contestant(s.contestant_id, s.criterion_id);
 
   if v_scored <> v_total then
     raise exception 'Please enter a score for every contestant and criterion before finalizing.';
@@ -535,6 +561,10 @@ begin
   if v_contestant_event is distinct from new.event_id
      or v_criterion_event is distinct from new.event_id then
     raise exception 'Contestant and criterion must belong to the same event as the score.';
+  end if;
+
+  if not public.criterion_applies_to_contestant(new.contestant_id, new.criterion_id) then
+    raise exception 'This criterion does not apply to that contestant''s division.';
   end if;
 
   if new.score is not null and (new.score < 0 or new.score > v_max) then

@@ -16,6 +16,8 @@ let judgeEmailEdited = false;
 let judgeRows = new Map();
 let currentResultsCache = null;
 let judgeCategoryIndex = Number(localStorage.getItem("sc_judge_category_index") || 0);
+let judgeDivision = localStorage.getItem("sc_judge_division") || "";
+let activeResultsDivision = "";
 
 function restoreUiState() {
   try {
@@ -317,8 +319,9 @@ async function deleteEvent(eventId) {
     danger: true,
     onSubmit: async (v) => {
       if (v.confirmName.trim() !== event.name) return "That doesn't match the event name.";
-      const { error } = await supabaseClient.from("events").delete().eq("id", eventId);
+      const { data: gone, error } = await supabaseClient.from("events").delete().eq("id", eventId).select("id");
       if (error) return error.message;
+      if (!gone || !gone.length) return "Nothing was deleted. The database refused the change (permissions or a lock). Refresh and try again; if it keeps happening, re-run schema.sql in Supabase.";
     }
   });
   if (!typed) return;
@@ -479,9 +482,10 @@ async function removeJudge(judgeId) {
     danger: true
   });
   if (!ok) return;
-  const { error } = await supabaseClient.from("event_judges").delete()
-    .eq("event_id", currentAdminEventId).eq("judge_id", judgeId);
+  const { data: gone, error } = await supabaseClient.from("event_judges").delete()
+    .eq("event_id", currentAdminEventId).eq("judge_id", judgeId).select("judge_id");
   if (error) { notify(error.message, ERR_TITLE); return; }
+  if (!gone || !gone.length) { notify("Nothing was deleted. The database refused the change (permissions or a lock). Refresh and try again; if it keeps happening, re-run schema.sql in Supabase.", ERR_TITLE); return; }
   await Promise.all([loadAdminJudges(), loadAdminScores()]);
   toast("Judge removed.");
 }
@@ -560,8 +564,9 @@ async function deleteContestant(id) {
     danger: true
   });
   if (!ok) return;
-  const { error } = await supabaseClient.from("contestants").delete().eq("id", id);
+  const { data: gone, error } = await supabaseClient.from("contestants").delete().eq("id", id).select("id");
   if (error) { notify(error.message, ERR_TITLE); return; }
+  if (!gone || !gone.length) { notify("Nothing was deleted. The database refused the change (permissions or a lock). Refresh and try again; if it keeps happening, re-run schema.sql in Supabase.", ERR_TITLE); return; }
   await Promise.all([loadAdminContestants(), loadAdminScores()]);
   toast("Contestant removed.");
 }
@@ -576,7 +581,7 @@ async function loadAdminCategories() {
 
   const [categoriesRes, criteriaRes] = await Promise.all([
     supabaseClient.from("scoring_categories")
-      .select("id, name, finalist_weight, counts_for_finalists, sort_order")
+      .select("id, name, finalist_weight, counts_for_finalists, sort_order, division")
       .eq("event_id", eventId).order("sort_order").order("name"),
     supabaseClient.from("criteria")
       .select("id, name, max_score, category_id")
@@ -589,12 +594,11 @@ async function loadAdminCategories() {
 
   const categories = categoriesRes.data || [];
   const criteria = criteriaRes.data || [];
-  const total = categories.filter(c => c.counts_for_finalists)
-    .reduce((sum, c) => sum + Number(c.finalist_weight), 0);
   const weightBox = $("#category-weight-total");
   const hasFinalist = categories.some(c => c.counts_for_finalists);
-  weightBox.textContent = `Finalist weights: ${round2(total)}% of 100%`;
-  weightBox.className = "weight-summary" + (!hasFinalist ? "" : Math.abs(total - 100) < 0.005 ? " ok" : " warn");
+  const scopes = weightScopes(categories);
+  weightBox.textContent = "Finalist weights: " + scopes.map(sc => sc.label ? `${sc.label} ${round2(sc.total)}%` : `${round2(sc.total)}% of 100%`).join(" · ");
+  weightBox.className = "weight-summary" + (!hasFinalist ? "" : scopes.every(sc => Math.abs(sc.total - 100) < 0.005) ? " ok" : " warn");
 
   if (!categories.length) {
     $("#admin-categories").innerHTML = `<div class="empty-state"><strong>No scoring categories yet</strong><span class="muted small">Use "Add category" to start building the scoring sheet.</span></div>`;
@@ -625,6 +629,7 @@ async function loadAdminCategories() {
               <h3>${escapeHtml(cat.name)}</h3>
               <div class="category-meta">
                 <span>${catCriteria.length} ${catCriteria.length === 1 ? "criterion" : "criteria"}</span>
+                ${cat.division ? `<span class="category-badge">${escapeHtml(cat.division)} only</span>` : ""}
                 ${cat.counts_for_finalists ? `<span class="category-badge">Finalists · ${round2(cat.finalist_weight)}%</span>` : "<span>Not used for finalists</span>"}
               </div>
             </div>
@@ -649,9 +654,14 @@ async function loadAdminCategories() {
   $("#admin-categories").innerHTML = `<div class="category-list">${cards}</div>${locked ? `<p class="muted small category-lock-note">Scoring setup is locked while this event is Active.</p>` : ""}`;
 }
 
-async function selectedFinalistWeight(exceptId = null) {
-  const { data } = await supabaseClient.from("scoring_categories").select("id, finalist_weight, counts_for_finalists").eq("event_id", currentAdminEventId);
-  return (data || []).filter(c => c.counts_for_finalists && c.id !== exceptId).reduce((s,c) => s + Number(c.finalist_weight), 0);
+async function selectedFinalistWeight(exceptId = null, division = "") {
+  const { data } = await supabaseClient.from("scoring_categories").select("id, finalist_weight, counts_for_finalists, division").eq("event_id", currentAdminEventId);
+  const fin = (data || []).filter(c => c.counts_for_finalists && c.id !== exceptId);
+  const sumFor = (k) => fin.filter(c => !divKey(c.division) || divKey(c.division) === k).reduce((t, c) => t + Number(c.finalist_weight), 0);
+  const k = divKey(division);
+  if (k) return sumFor(k);
+  const keys = [...new Set(fin.map(c => divKey(c.division)).filter(Boolean))];
+  return Math.max(sumFor(""), ...keys.map(sumFor));
 }
 
 async function openCategoryDialog(id = null) {
@@ -667,31 +677,34 @@ async function openCategoryDialog(id = null) {
   const others = await selectedFinalistWeight(id);
   const remaining = Math.max(0, Number((100 - others).toFixed(2)));
 
+  const byDivisionEvent = (currentEvent()?.numbering_mode || "unique") === "by_division";
   const saved = await formDialog({
     title: id ? "Edit category" : "Add category",
     fields: [
       { name: "name", label: "Category name", value: existing?.name || "", required: true, placeholder: "e.g. Talent" },
+      ...(byDivisionEvent ? [{ name: "division", label: "Division (optional)", value: existing?.division || "", placeholder: "e.g. Voice", hint: "Only contestants in this division are scored on it. Leave blank to apply to every division." }] : []),
       { name: "finalist", type: "checkbox", label: "Count toward the finalist score", value: !!existing?.counts_for_finalists },
-      { name: "weight", label: "Finalist weight (%)", type: "number", value: existing?.counts_for_finalists ? existing.finalist_weight : "", min: 0, max: 100, showIf: "finalist", hint: `Other categories use ${round2(others)}%, so up to ${round2(remaining)}% is available.` }
+      { name: "weight", label: "Finalist weight (%)", type: "number", value: existing?.counts_for_finalists ? existing.finalist_weight : "", min: 0, max: 100, showIf: "finalist", hint: "Within a division, finalist weights must total 100%." }
     ],
     submitText: id ? "Save changes" : "Add category",
     onSubmit: async (v) => {
       const weight = v.finalist ? v.weight : 0;
       if (v.finalist) {
         if (!(weight > 0)) return "Enter a weight above 0, or turn off finalist scoring for this category.";
-        if (others + weight > 100.0001) return `Finalist weights can't total more than 100%. Only ${round2(remaining)}% is available.`;
+        const othersHere = await selectedFinalistWeight(id, byDivisionEvent ? v.division : "");
+        if (othersHere + weight > 100.0001) return `Finalist weights ${byDivisionEvent && v.division ? "for " + v.division + " " : ""}can't total more than 100%. Only ${round2(Math.max(0, 100 - othersHere))}% is available.`;
       }
       let error;
       if (id) {
         ({ error } = await supabaseClient.from("scoring_categories")
-          .update({ name: v.name, counts_for_finalists: !!v.finalist, finalist_weight: weight }).eq("id", id));
+          .update({ name: v.name, counts_for_finalists: !!v.finalist, finalist_weight: weight, division: byDivisionEvent ? (v.division || null) : null }).eq("id", id));
       } else {
         const { data: last } = await supabaseClient.from("scoring_categories")
           .select("sort_order").eq("event_id", currentAdminEventId)
           .order("sort_order", { ascending: false }).limit(1);
         const sort_order = (last?.[0]?.sort_order ?? 0) + 1;
         ({ error } = await supabaseClient.from("scoring_categories")
-          .insert({ event_id: currentAdminEventId, name: v.name, counts_for_finalists: !!v.finalist, finalist_weight: weight, sort_order }));
+          .insert({ event_id: currentAdminEventId, name: v.name, counts_for_finalists: !!v.finalist, finalist_weight: weight, sort_order, division: byDivisionEvent ? (v.division || null) : null }));
       }
       if (error) return error.code === "23505" ? "A category with that name already exists in this event." : error.message;
     }
@@ -708,8 +721,9 @@ async function deleteCategory(id) {
   if (count && count > 0) { notify("Remove or move the criteria in this category before removing the category.", "Category isn't empty"); return; }
   const ok = await confirmDialog({ title: "Remove category?", message: "This scoring category will be removed.", confirmText: "Remove", danger: true });
   if (!ok) return;
-  const { error } = await supabaseClient.from("scoring_categories").delete().eq("id", id);
+  const { data: gone, error } = await supabaseClient.from("scoring_categories").delete().eq("id", id).select("id");
   if (error) { notify(error.message, ERR_TITLE); return; }
+  if (!gone || !gone.length) { notify("Nothing was deleted. The database refused the change (permissions or a lock). Refresh and try again; if it keeps happening, re-run schema.sql in Supabase.", ERR_TITLE); return; }
   await loadAdminCategories();
   toast("Category removed.");
 }
@@ -765,8 +779,9 @@ async function deleteCriterion(id) {
     danger: true
   });
   if (!ok) return;
-  const { error } = await supabaseClient.from("criteria").delete().eq("id", id);
+  const { data: gone, error } = await supabaseClient.from("criteria").delete().eq("id", id).select("id");
   if (error) { notify(error.message, ERR_TITLE); return; }
+  if (!gone || !gone.length) { notify("Nothing was deleted. The database refused the change (permissions or a lock). Refresh and try again; if it keeps happening, re-run schema.sql in Supabase.", ERR_TITLE); return; }
   await Promise.all([loadAdminCategories(), loadAdminScores()]);
   toast("Criterion removed.");
 }
@@ -808,7 +823,7 @@ async function loadAdminScores({ force = false } = {}) {
   try {
     const [contestantsRes, categoriesRes, criteriaRes, judgesRes, scoresRes, submissionsRes] = await Promise.all([
       supabaseClient.from("contestants").select("id, number, name, division").eq("event_id", eventId).order("division").order("number"),
-      supabaseClient.from("scoring_categories").select("id, name, finalist_weight, counts_for_finalists, sort_order").eq("event_id", eventId).order("sort_order").order("name"),
+      supabaseClient.from("scoring_categories").select("id, name, finalist_weight, counts_for_finalists, sort_order, division").eq("event_id", eventId).order("sort_order").order("name"),
       supabaseClient.from("criteria").select("id, name, max_score, category_id").eq("event_id", eventId).order("category_id").order("name"),
       supabaseClient.from("event_judges").select("judge_id, active, judge:judge_id(display_name)").eq("event_id", eventId),
       fetchAllScores(eventId),
@@ -867,24 +882,25 @@ function renderResults(model) {
     const perJudge={};
     for (const j of judges) {
       const categoryScores={}; const categoryComplete={};
-      for (const cat of categories) {
+      for (const cat of categories.filter(x => catApplies(x, c))) {
         const catCriteria=criteria.filter(k=>k.category_id===cat.id);
         const values=catCriteria.map(k=>scoreMap.get(`${j.id}:${c.id}:${k.id}`));
         const completeCat=catCriteria.length>0 && values.every(v=>v!==undefined);
         categoryComplete[cat.id]=completeCat;
-        const pct=completeCat ? values.reduce((sum,v,idx)=>sum + (v/Number(catCriteria[idx].max_score))*100,0)/values.length : null;
+        const pct=completeCat ? values.reduce((sum,v)=>sum+v,0)/catCriteria.reduce((sum,k)=>sum+Number(k.max_score),0)*100 : null;
         categoryScores[cat.id]=pct;
       }
       // The finalist score only needs the categories that actually count toward
       // it. A non-finalist category being unscored, or a finalist category that
       // has no criteria yet, must not block a judge's finished contestants.
-      const complete = finalistCategories.every(cat => {
+      const finalistFor = finalistCategories.filter(x => catApplies(x, c));
+      const complete = finalistFor.every(cat => {
         const catCriteria=criteria.filter(k=>k.category_id===cat.id);
         return catCriteria.length===0 || categoryComplete[cat.id];
       });
       let finalistScore=null;
-      if (complete && finalistCategories.length) {
-        finalistScore=finalistCategories.reduce((sum,cat)=>sum + (categoryScores[cat.id]||0)*(Number(cat.finalist_weight)/100),0);
+      if (complete && finalistFor.length) {
+        finalistScore=finalistFor.reduce((sum,cat)=>sum + (categoryScores[cat.id]||0)*(Number(cat.finalist_weight)/100),0);
       }
       perJudge[j.id]={categoryScores, complete, finalistScore};
     }
@@ -892,30 +908,41 @@ function renderResults(model) {
     const average=completeScores.length ? completeScores.reduce((a,b)=>a+b,0)/completeScores.length : null;
     return { contestant:c, perJudge, average, judgesDone:completeScores.length };
   });
-  const ranked=results.filter(r=>r.average!==null).sort((a,b)=>b.average-a.average || a.contestant.number-b.contestant.number);
-  ranked.forEach((r,i)=>{const prev=ranked[i-1];r.rank=prev&&round2(prev.average)===round2(r.average)?prev.rank:i+1;});
-  const ordered=[...ranked,...results.filter(r=>r.average===null)];
+  // Rank inside each division (one table per division when the event uses divisions).
+  const byDivMode=(currentEvent()?.numbering_mode||"unique")==="by_division";
+  const groupOf=r=>byDivMode?divKey(r.contestant.division):"";
+  const groups=[...new Set(results.map(groupOf))].map(k=>{
+    const members=results.filter(r=>groupOf(r)===k);
+    const ranked=members.filter(r=>r.average!==null).sort((a,b)=>b.average-a.average || a.contestant.number-b.contestant.number);
+    ranked.forEach((r,i)=>{const prev=ranked[i-1];r.rank=prev&&round2(prev.average)===round2(r.average)?prev.rank:i+1;});
+    return {label:k?String(members[0].contestant.division||"").trim():"", ordered:[...ranked,...members.filter(r=>r.average===null)]};
+  });
   const judgeHeaders=judges.map(j=>`<th>${escapeHtml(j.name)}${submissionMap.has(j.id)?" <small class='muted'>(final)</small>":j.active?"":" <small class='muted'>(off)</small>"}</th>`).join("");
-  const rankRows=ordered.map(r=>{
+  const rankRowsFor=(ordered)=>ordered.map(r=>{
     const cells=judges.map(j=>{const p=r.perJudge[j.id]; if(p.finalistScore!==null)return `<td>${p.finalistScore.toFixed(2)}</td>`; return `<td class="muted">${p.complete?"—":"Incomplete"}</td>`;}).join("");
-    return `<tr><td class="t-left rank-cell"><strong>${r.rank??"—"}</strong></td>${r.contestant.division ? `<td class="t-left">${escapeHtml(r.contestant.division)}</td>` : ""}<td class="t-left muted-cell">${r.contestant.number}</td><td class="t-left">${escapeHtml(r.contestant.name)}</td>${cells}<td>${r.judgesDone}/${judges.length}</td><td><strong>${r.average===null?"—":r.average.toFixed(2)}</strong></td></tr>`;
+    return `<tr><td class="t-left rank-cell"><strong>${r.rank??"—"}</strong></td><td class="t-left muted-cell">${r.contestant.number}</td><td class="t-left">${escapeHtml(r.contestant.name)}</td>${cells}<td>${r.judgesDone}/${judges.length}</td><td><strong>${r.average===null?"—":r.average.toFixed(2)}</strong></td></tr>`;
   }).join("");
-  const weightText=finalistCategories.length ? finalistCategories.map(c=>`${escapeHtml(c.name)} ${round2(c.finalist_weight)}%`).join(" · ") : "No finalist categories configured yet.";
+  const weightText=finalistCategories.length ? finalistCategories.map(c=>`${escapeHtml(c.name)}${c.division?` (${escapeHtml(c.division)})`:""} ${round2(c.finalist_weight)}%`).join(" · ") : "No finalist categories configured yet.";
   const showDivision = (currentEvent()?.numbering_mode || "unique") === "by_division";
-  const rankingTable=`<div class="table-scroll"><table class="ranking"><thead><tr><th class="t-left">Rank</th>${showDivision ? '<th class="t-left">Division</th>' : ""}<th class="t-left">No.</th><th class="t-left">Contestant</th>${judgeHeaders}<th>Judges done</th><th>Finalist score</th></tr></thead><tbody>${rankRows}</tbody></table></div>`;
+  if (!groups.some(g=>g.label===activeResultsDivision)) activeResultsDivision = groups[0]?.label || "";
+  const shownGroups = groups.length>1 ? groups.filter(g=>g.label===activeResultsDivision) : groups;
+  const divTabs = groups.length>1 ? `<div class="division-tabs" role="tablist">${groups.map(g=>`<button type="button" class="division-tab ${g.label===activeResultsDivision?"active":""}" data-result-division="${escapeHtml(g.label)}">${escapeHtml(g.label||"General")}</button>`).join("")}</div>` : "";
+  const rankingTable=divTabs+shownGroups.map(g=>`<div class="table-scroll"><table class="ranking"><thead><tr><th class="t-left">Rank</th><th class="t-left">No.</th><th class="t-left">Contestant</th>${judgeHeaders}<th>Judges done</th><th>Finalist score</th></tr></thead><tbody>${rankRowsFor(g.ordered)}</tbody></table></div>`).join("");
 
   const detail=judges.map(j=>{
-    const totalCells=contestants.length*criteria.length;
-    const entered=criteria.reduce((n,k)=>n+contestants.filter(c=>scoreMap.has(`${j.id}:${c.id}:${k.id}`)).length,0);
+    const totalCells=criteria.reduce((n,k)=>n+contestants.filter(c=>catApplies(categoryMap.get(k.category_id),c)).length,0);
+    const entered=criteria.reduce((n,k)=>n+contestants.filter(c=>catApplies(categoryMap.get(k.category_id),c)&&scoreMap.has(`${j.id}:${c.id}:${k.id}`)).length,0);
     const judgeOpen=openJudgeTables.has(j.id)?"open":"";
     const categoryBlocks=categories.map(cat=>{
       const catCriteria=criteria.filter(k=>k.category_id===cat.id);
-      const catTotal=contestants.length*catCriteria.length;
-      const catEntered=contestants.reduce((n,c)=>n+catCriteria.filter(k=>scoreMap.has(`${j.id}:${c.id}:${k.id}`)).length,0);
+      const catContestants=contestants.filter(c=>catApplies(cat,c));
+      if(!catContestants.length) return "";
+      const catTotal=catContestants.length*catCriteria.length;
+      const catEntered=catContestants.reduce((n,c)=>n+catCriteria.filter(k=>scoreMap.has(`${j.id}:${c.id}:${k.id}`)).length,0);
       const catComplete=catTotal>0 && catEntered===catTotal;
       const categoryKey=`${j.id}:${cat.id}`;
       const categoryOpen=openJudgeCategories.has(categoryKey)?"open":"";
-      const rows=contestants.map(c=>{
+      const rows=catContestants.map(c=>{
         const cells=catCriteria.map(k=>{
           const v=scoreMap.get(`${j.id}:${c.id}:${k.id}`);
           return v===undefined?`<td class="muted">—</td>`:`<td>${v}</td>`;
@@ -939,12 +966,30 @@ function renderResults(model) {
   box._lastHtml = html;
   box.innerHTML=html;
   $("#export-overall").addEventListener("click", exportOverallPdf);
+  box.querySelectorAll("[data-result-division]").forEach(btn=>btn.addEventListener("click",()=>{activeResultsDivision=btn.dataset.resultDivision;box._lastHtml=null;renderResults(currentResultsCache);}));
   box.querySelectorAll("[data-export-judge]").forEach(btn=>btn.addEventListener("click",()=>exportJudgePdf(btn.dataset.exportJudge)));
 }
 
 /* ------------------------------------------------------------------ */
 /* PDF EXPORT                                                         */
 /* ------------------------------------------------------------------ */
+
+const divKey = (d) => String(d ?? "").trim().toLowerCase();
+// A category with a division is scored only for contestants of that division.
+// No division on either side = applies to everyone.
+function catApplies(cat, contestant) {
+  if (!cat || !contestant) return true;
+  const cd = divKey(cat.division), od = divKey(contestant.division);
+  return !cd || !od || cd === od;
+}
+function weightScopes(categories) {
+  const fin = categories.filter(c => c.counts_for_finalists);
+  const divs = new Map();
+  fin.forEach(c => { const k = divKey(c.division); if (k && !divs.has(k)) divs.set(k, String(c.division).trim()); });
+  const sumFor = (k) => fin.filter(c => !divKey(c.division) || divKey(c.division) === k).reduce((t, c) => t + Number(c.finalist_weight), 0);
+  if (!divs.size) return [{ label: "", total: sumFor("") }];
+  return [...divs].map(([k, label]) => ({ label, total: sumFor(k) }));
+}
 
 function pdfDoc(title) {
   if (!window.jspdf?.jsPDF) { notify("PDF export is not available. Please check the jsPDF libraries in index.html."); return null; }
@@ -963,7 +1008,7 @@ function categoryPct(scoreMap, judgeId, contestantId, catCriteria) {
   if (!catCriteria.length) return null;
   const values = catCriteria.map(k => scoreMap.get(`${judgeId}:${contestantId}:${k.id}`));
   if (!values.every(v => v !== undefined)) return null;
-  return values.reduce((sum, v, idx) => sum + (v / Number(catCriteria[idx].max_score)) * 100, 0) / values.length;
+  return values.reduce((sum, v) => sum + Number(v), 0) / catCriteria.reduce((sum, k) => sum + Number(k.max_score), 0) * 100;
 }
 
 // Places a section title + table right after whatever came before it, only
@@ -988,16 +1033,18 @@ function exportOverallPdf(){
   const scoreMap=new Map(m.scores.map(s=>[`${s.judge_id}:${s.contestant_id}:${s.criterion_id}`,s.score]));
   const finalistCats=m.categories.filter(c=>c.counts_for_finalists&&Number(c.finalist_weight)>0);
   const rows=m.contestants.map(c=>{
+    const fcC=finalistCats.filter(cat=>catApplies(cat,c));
     const judgeScores=m.judges.map(j=>{
       const vals=[];
-      for(const cat of finalistCats){const ks=m.criteria.filter(k=>k.category_id===cat.id);const ok=ks.every(k=>scoreMap.has(`${j.id}:${c.id}:${k.id}`));if(!ok)return null;const pct=ks.reduce((s,k)=>s+Number(scoreMap.get(`${j.id}:${c.id}:${k.id}`))/Number(k.max_score)*100,0)/ks.length;vals.push(pct*Number(cat.finalist_weight)/100);}
-      return vals.length===finalistCats.length?vals.reduce((a,b)=>a+b,0):null;
+      for(const cat of fcC){const ks=m.criteria.filter(k=>k.category_id===cat.id);const ok=ks.every(k=>scoreMap.has(`${j.id}:${c.id}:${k.id}`));if(!ok)return null;const pct=ks.reduce((s,k)=>s+Number(scoreMap.get(`${j.id}:${c.id}:${k.id}`)),0)/ks.reduce((s,k)=>s+Number(k.max_score),0)*100;vals.push(pct*Number(cat.finalist_weight)/100);}
+      return fcC.length&&vals.length===fcC.length?vals.reduce((a,b)=>a+b,0):null;
     });
     const done=judgeScores.filter(v=>v!==null); const avg=done.length?done.reduce((a,b)=>a+b,0)/done.length:null;
     return {c,judgeScores,avg};
-  }).filter(r=>r.avg!==null).sort((a,b)=>b.avg-a.avg||a.c.number-b.c.number);
+  }).filter(r=>r.avg!==null).sort((a,b)=>divKey(a.c.division).localeCompare(divKey(b.c.division))||b.avg-a.avg||a.c.number-b.c.number);
+  const rankCount=new Map(); rows.forEach(r=>{const k=divKey(r.c.division);const n=(rankCount.get(k)||0)+1;rankCount.set(k,n);r.rank=n;});
   const showDivision=(m.event?.numbering_mode||"unique")==="by_division";
-  doc.autoTable({startY:70,head:[["Rank",...(showDivision?["Division"]:[]),"No.","Contestant",...m.judges.map(j=>j.name),"Finalist score"]],body:rows.map((r,i)=>[i+1,...(showDivision?[r.c.division||""]:[]),r.c.number,r.c.name,...r.judgeScores.map(v=>v===null?"—":v.toFixed(2)),r.avg.toFixed(2)]) ,styles:{fontSize:7},headStyles:{fontSize:7}});
+  doc.autoTable({startY:70,head:[["Rank",...(showDivision?["Division"]:[]),"No.","Contestant",...m.judges.map(j=>j.name),"Finalist score"]],body:rows.map((r)=>[r.rank,...(showDivision?[r.c.division||""]:[]),r.c.number,r.c.name,...r.judgeScores.map(v=>v===null?"—":v.toFixed(2)),r.avg.toFixed(2)]) ,styles:{fontSize:7},headStyles:{fontSize:7}});
 
   // One page per category: every judge's % for that category, side by side.
   for (const cat of m.categories) {
@@ -1011,7 +1058,7 @@ function exportOverallPdf(){
 
     addCategorySection(doc, subtitle, {
       head: [[...(showDivision?["Division"]:[]),"No.","Contestant",...m.judges.map(j=>j.name)]],
-      body: m.contestants.map(c => [
+      body: m.contestants.filter(c=>catApplies(cat,c)).map(c => [
         ...(showDivision?[c.division||""]:[]), c.number, c.name,
         ...m.judges.map(j => { const pct = categoryPct(scoreMap, j.id, c.id, catCriteria); return pct===null?"—":pct.toFixed(2)+"%"; })
       ]),
@@ -1031,8 +1078,8 @@ function exportJudgePdf(judgeId){
 
   // Page 1: overview with this judge's blended finalist score per contestant.
   const rows=m.contestants.map(c=>{
-    let fs=null; if(finalistCats.length && finalistCats.every(cat=>{const ks=m.criteria.filter(k=>k.category_id===cat.id);return ks.length&&ks.every(k=>scoreMap.has(`${judge.id}:${c.id}:${k.id}`));})){
-      fs=finalistCats.reduce((sum,cat)=>{const ks=m.criteria.filter(k=>k.category_id===cat.id);const pct=ks.reduce((s,k)=>s+Number(scoreMap.get(`${judge.id}:${c.id}:${k.id}`))/Number(k.max_score)*100,0)/ks.length;return sum+pct*Number(cat.finalist_weight)/100;},0);
+    const fcC=finalistCats.filter(cat=>catApplies(cat,c)); let fs=null; if(fcC.length && fcC.every(cat=>{const ks=m.criteria.filter(k=>k.category_id===cat.id);return ks.length&&ks.every(k=>scoreMap.has(`${judge.id}:${c.id}:${k.id}`));})){
+      fs=fcC.reduce((sum,cat)=>{const ks=m.criteria.filter(k=>k.category_id===cat.id);const pct=ks.reduce((s,k)=>s+Number(scoreMap.get(`${judge.id}:${c.id}:${k.id}`)),0)/ks.reduce((s,k)=>s+Number(k.max_score),0)*100;return sum+pct*Number(cat.finalist_weight)/100;},0);
     }
     return [...(showDivision?[c.division||""]:[]),c.number,c.name,fs===null?"—":fs.toFixed(2)];
   });
@@ -1050,7 +1097,7 @@ function exportJudgePdf(judgeId){
 
     addCategorySection(doc, subtitle, {
       head: [[...(showDivision?["Division"]:[]),"No.","Contestant",...catCriteria.map(k=>`${k.name} (max ${Number(k.max_score)})`),...(isFinalist?["Contribution"]:[])]],
-      body: m.contestants.map(c => {
+      body: m.contestants.filter(c=>catApplies(cat,c)).map(c => {
         const vals=catCriteria.map(k=>scoreMap.get(`${judge.id}:${c.id}:${k.id}`));
         const row=[...(showDivision?[c.division||""]:[]), c.number, c.name, ...vals.map(v=>v===undefined?"—":v)];
         if (isFinalist) {
@@ -1102,7 +1149,7 @@ async function loadJudgeScoresheet() {
 
   const [contestantsRes, categoriesRes, criteriaRes, scoresRes, submissionRes] = await Promise.all([
     supabaseClient.from("contestants").select("id,name,number,division").eq("event_id", eventId).order("division").order("number"),
-    supabaseClient.from("scoring_categories").select("id,name,finalist_weight,counts_for_finalists,sort_order").eq("event_id", eventId).order("sort_order").order("name"),
+    supabaseClient.from("scoring_categories").select("id,name,finalist_weight,counts_for_finalists,sort_order,division").eq("event_id", eventId).order("sort_order").order("name"),
     supabaseClient.from("criteria").select("id,name,max_score,category_id").eq("event_id", eventId).order("category_id").order("name"),
     supabaseClient.from("scores").select("contestant_id,criterion_id,score").eq("event_id", eventId).eq("judge_id", currentUser.id),
     supabaseClient.from("judge_submissions").select("finalized_at").eq("event_id", eventId).eq("judge_id", currentUser.id).maybeSingle()
@@ -1124,25 +1171,39 @@ async function loadJudgeScoresheet() {
   }
 
   const scoreMap = new Map((scoresRes.data || []).map(s => [`${s.contestant_id}:${s.criterion_id}`, s.score]));
-  const totalCells = contestants.length * criteria.length;
-  const enteredCells = criteria.reduce((count, k) => count + contestants.filter(c => scoreMap.get(`${c.id}:${k.id}`) !== null && scoreMap.get(`${c.id}:${k.id}`) !== undefined).length, 0);
-  const categoryCompletion = categories.map(cat => {
+  // Voice / Dance style tabs: only when the event has more than one division.
+  const divisionList = [...new Map(contestants.filter(c => divKey(c.division)).map(c => [divKey(c.division), String(c.division).trim()])).values()];
+  if (divisionList.length > 1) {
+    if (!divisionList.some(d => divKey(d) === divKey(judgeDivision))) judgeDivision = divisionList[0];
+  } else { judgeDivision = ""; }
+  const inView = (c) => !judgeDivision || divKey(c.division) === divKey(judgeDivision);
+  const viewCats = judgeDivision ? categories.filter(cat => !divKey(cat.division) || divKey(cat.division) === divKey(judgeDivision)) : categories;
+  const divisionTabsHtml = divisionList.length > 1 ? `<div class="division-tabs" role="tablist">${divisionList.map(d => `<button type="button" class="division-tab ${divKey(d) === divKey(judgeDivision) ? "active" : ""}" data-judge-division="${escapeHtml(d)}">${escapeHtml(d)}</button>`).join("")}</div>` : "";
+  const applies = (k, c) => catApplies(categories.find(x => x.id === k.category_id), c);
+  const totalCells = criteria.reduce((n, k) => n + contestants.filter(c => applies(k, c)).length, 0);
+  const enteredCells = criteria.reduce((count, k) => count + contestants.filter(c => applies(k, c) && scoreMap.get(`${c.id}:${k.id}`) !== null && scoreMap.get(`${c.id}:${k.id}`) !== undefined).length, 0);
+  const categoryCompletion = viewCats.map(cat => {
     const ks = criteria.filter(k => k.category_id === cat.id);
-    const entered = ks.reduce((n, k) => n + contestants.filter(c => scoreMap.get(`${c.id}:${k.id}`) !== null && scoreMap.get(`${c.id}:${k.id}`) !== undefined).length, 0);
-    const total = contestants.length * ks.length;
+    const entered = ks.reduce((n, k) => n + contestants.filter(c => inView(c) && applies(k, c) && scoreMap.get(`${c.id}:${k.id}`) !== null && scoreMap.get(`${c.id}:${k.id}`) !== undefined).length, 0);
+    const total = contestants.filter(c => inView(c) && catApplies(cat, c)).length * ks.length;
     return { cat, entered, total, complete: total > 0 && entered === total };
   });
 
-  if (judgeCategoryIndex >= categories.length) judgeCategoryIndex = categories.length - 1;
+  if (!viewCats.length) {
+    sheet.innerHTML = divisionTabsHtml + `<div class="judge-empty"><strong>No criteria for this division yet.</strong><span class="muted small">The admin needs to add a category for ${escapeHtml(judgeDivision)}.</span></div>`;
+    bindJudgeDivisionTabs(sheet);
+    return;
+  }
+  if (judgeCategoryIndex >= viewCats.length) judgeCategoryIndex = viewCats.length - 1;
   if (judgeCategoryIndex < 0) judgeCategoryIndex = 0;
   localStorage.setItem("sc_judge_category_index", String(judgeCategoryIndex));
 
-  const activeCategory = categories[judgeCategoryIndex];
+  const activeCategory = viewCats[judgeCategoryIndex];
   const activeCriteria = criteria.filter(k => k.category_id === activeCategory.id);
   const activeCompletion = categoryCompletion[judgeCategoryIndex];
   const overallPercent = totalCells ? Math.round((enteredCells / totalCells) * 100) : 0;
 
-  let html = `
+  let html = divisionTabsHtml + `
     <div class="judge-progress-card">
       <div>
         <div class="progress-title">Overall progress <strong>${overallPercent}%</strong></div>
@@ -1160,41 +1221,41 @@ async function loadJudgeScoresheet() {
       ${categoryCompletion.map((item, i) => `
         <button type="button" class="category-step ${i === judgeCategoryIndex ? "active" : ""} ${item.complete ? "complete" : ""}" data-judge-category="${i}">
           <span class="step-number">${item.complete ? "✓" : i + 1}</span>
-          <span class="step-text"><strong>${escapeHtml(item.cat.name)}</strong><small>${item.entered}/${item.total || 0}</small></span>
+          <span class="step-text"><strong>${escapeHtml(item.cat.name)}</strong><small>${item.cat.division ? escapeHtml(item.cat.division) + " · " : ""}${item.entered}/${item.total || 0}</small></span>
         </button>`).join("")}
     </div>
 
     <section class="judge-category-card">
       <div class="judge-category-head">
         <div>
-          <div class="category-kicker">Category ${judgeCategoryIndex + 1} of ${categories.length}</div>
+          <div class="category-kicker">Category ${judgeCategoryIndex + 1} of ${viewCats.length}${activeCategory.division ? " · " + escapeHtml(activeCategory.division) : ""}</div>
           <h3>${escapeHtml(activeCategory.name)}</h3>
           <p class="muted small">${activeCompletion.entered} of ${activeCompletion.total} scores entered${activeCategory.counts_for_finalists ? ` · ${round2(activeCategory.finalist_weight)}% finalist weight` : ""}</p>
         </div>
         ${activeCompletion.complete ? `<span class="category-complete">✓ Complete</span>` : `<span class="category-pending">In progress</span>`}
       </div>
 
-      ${activeCriteria.length ? `<div class="table-scroll judge-category-table-wrap"><table class="category-scoresheet"><thead><tr><th>Contestant</th>${activeCriteria.map(k => `<th>${escapeHtml(k.name)}<small>Max ${Number(k.max_score)}</small></th>`).join("")}</tr></thead><tbody>
-        ${contestants.map(c => {
+      ${activeCriteria.length ? `<div class="table-scroll judge-category-table-wrap"><table class="category-scoresheet"><thead><tr><th>Contestant</th>${activeCriteria.map(k => `<th>${escapeHtml(k.name)}<small>Max ${Number(k.max_score)}</small></th>`).join("")}<th>Total<small>Max ${activeCriteria.reduce((t, k) => t + Number(k.max_score), 0)}</small></th></tr></thead><tbody>
+        ${contestants.filter(c => inView(c) && catApplies(activeCategory, c)).map(c => {
           const label = c.division ? `${escapeHtml(c.division)} · ${c.number}. ${escapeHtml(c.name)}` : `${c.number}. ${escapeHtml(c.name)}`;
           return `<tr><td class="contestant-cell"><strong>${label}</strong></td>${activeCriteria.map(k => {
             const saved = scoreMap.get(`${c.id}:${k.id}`);
             return `<td data-label="${escapeHtml(k.name)} (max ${Number(k.max_score)})"><input class="score-input" type="number" min="0" max="${Number(k.max_score)}" step="0.01" value="${saved ?? ""}" data-event-id="${eventId}" data-contestant-id="${c.id}" data-criterion-id="${k.id}" data-max="${Number(k.max_score)}" placeholder="0-${Number(k.max_score)}" ${finalized ? "disabled" : ""}></td>`;
-          }).join("")}</tr>`;
+          }).join("")}<td class="total-cell" data-total-for="${c.id}">${round2(activeCriteria.reduce((t, k) => t + (Number(scoreMap.get(`${c.id}:${k.id}`)) || 0), 0))}</td></tr>`;
         }).join("")}
       </tbody></table></div>` : `<div class="empty-criteria"><strong>No criteria in this category.</strong></div>`}
     </section>
 
     <div class="judge-category-nav">
       <button type="button" class="secondary" id="judge-prev-category" ${judgeCategoryIndex === 0 ? "disabled" : ""}>← Previous</button>
-      <span class="muted small">${judgeCategoryIndex + 1} / ${categories.length}</span>
-      <button type="button" id="judge-next-category" ${judgeCategoryIndex === categories.length - 1 ? "disabled" : ""}>Next →</button>
+      <span class="muted small">${judgeCategoryIndex + 1} / ${viewCats.length}</span>
+      <button type="button" id="judge-next-category" ${judgeCategoryIndex === viewCats.length - 1 ? "disabled" : ""}>Next →</button>
     </div>`;
 
   sheet.innerHTML = html;
 
   sheet.querySelectorAll(".score-input").forEach(input => {
-    input.addEventListener("input", () => clampScoreInput(input));
+    input.addEventListener("input", () => { clampScoreInput(input); updateRowTotal(input); });
     input.addEventListener("change", saveScore);
   });
 
@@ -1211,12 +1272,30 @@ async function loadJudgeScoresheet() {
   });
 
   $("#judge-next-category")?.addEventListener("click", () => {
-    judgeCategoryIndex = Math.min(categories.length - 1, judgeCategoryIndex + 1);
+    judgeCategoryIndex = Math.min(viewCats.length - 1, judgeCategoryIndex + 1);
     localStorage.setItem("sc_judge_category_index", String(judgeCategoryIndex));
     loadJudgeScoresheet();
   });
 
   $("#finalize-scores")?.addEventListener("click", () => finalizeScores(eventId));
+  bindJudgeDivisionTabs(sheet);
+}
+
+function bindJudgeDivisionTabs(sheet) {
+  sheet.querySelectorAll("[data-judge-division]").forEach(btn => btn.addEventListener("click", () => {
+    judgeDivision = btn.dataset.judgeDivision;
+    judgeCategoryIndex = 0;
+    localStorage.setItem("sc_judge_division", judgeDivision);
+    localStorage.setItem("sc_judge_category_index", "0");
+    loadJudgeScoresheet();
+  }));
+}
+
+function updateRowTotal(input) {
+  const row = input.closest("tr");
+  const cell = row?.querySelector(".total-cell");
+  if (!cell) return;
+  cell.textContent = round2([...row.querySelectorAll(".score-input")].reduce((t, el) => t + (Number(el.value) || 0), 0));
 }
 
 function clampScoreInput(input){
